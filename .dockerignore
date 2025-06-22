@@ -1,0 +1,55 @@
+# Git相关
+.git
+.gitignore
+
+# 文档
+*.md
+USER_GUIDE.md
+修复报告.md
+
+# 开发环境文件
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Node modules
+frontend/node_modules
+**/node_modules
+
+# 构建输出
+frontend/dist
+frontend/build
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# 测试文件
+test_*.py
+*test*.py
+
+# 临时文件
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# 脚本文件
+*.bat
+*.sh
+
+# 数据库文件（如果不需要预设数据）
+backend/database/*.db 
