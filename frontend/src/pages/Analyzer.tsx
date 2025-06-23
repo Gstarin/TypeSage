@@ -305,7 +305,7 @@ filtered = [x for x in items if x > threshold]  # threshold未声明`
             
             <div className="border rounded-lg overflow-hidden">
               <Editor
-                height="400px"
+                height="500px"
                 defaultLanguage="python"
                 value={code}
                 onChange={handleCodeChange}
@@ -553,7 +553,7 @@ filtered = [x for x in items if x > threshold]  # threshold未声明`
                         height="400px"
                         defaultLanguage="python"
                         value={annotationResult.original_code}
-                        theme="vs-light"
+                        theme="vs-dark"
                         options={{
                           readOnly: true,
                           minimap: { enabled: false },
@@ -572,7 +572,7 @@ filtered = [x for x in items if x > threshold]  # threshold未声明`
                         height="400px"
                         defaultLanguage="python"
                         value={annotationResult.annotated_code}
-                        theme="vs-light"
+                        theme="vs-dark"
                         options={{
                           readOnly: true,
                           minimap: { enabled: false },

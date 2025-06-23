@@ -4,6 +4,7 @@ import re
 from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
 import json
+import builtins
 
 class ASTAnalyzer:
     """AST分析器"""
@@ -553,224 +554,625 @@ class SymbolTableVisitor(ast.NodeVisitor):
         else:
             return str(node)
     
-    def _infer_type_from_value(self, node) -> str:
-        """从值推断类型"""
-        if isinstance(node, ast.Constant):
-            if isinstance(node.value, str):
-                return "str"
-            elif isinstance(node.value, int):
-                return "int"
-            elif isinstance(node.value, float):
-                return "float"
-            elif isinstance(node.value, bool):
-                return "bool"
-            elif node.value is None:
-                return "None"
-        elif isinstance(node, ast.List):
-            # 分析列表元素类型
-            if node.elts:
-                element_types = set()
-                for elt in node.elts[:3]:  # 只检查前3个元素
-                    element_type = self._infer_type_from_value(elt)
-                    element_types.add(element_type)
-                if len(element_types) == 1:
-                    return f"list[{element_types.pop()}]"
-                else:
-                    return "list"
-            return "list"
-        elif isinstance(node, ast.Dict):
-            # 分析字典键值类型
-            if node.keys and node.values:
-                key_types = set()
-                value_types = set()
-                for key, value in zip(node.keys[:3], node.values[:3]):  # 只检查前3对
-                    if key:  # 排除None键
-                        key_type = self._infer_type_from_value(key)
-                        key_types.add(key_type)
-                    value_type = self._infer_type_from_value(value)
-                    value_types.add(value_type)
-                
-                if len(key_types) == 1 and len(value_types) == 1:
-                    return f"dict[{key_types.pop()}, {value_types.pop()}]"
-                else:
-                    return "dict"
-            return "dict"
-        elif isinstance(node, ast.Set):
-            # 分析集合元素类型
-            if node.elts:
-                element_types = set()
-                for elt in node.elts[:3]:  # 只检查前3个元素
-                    element_type = self._infer_type_from_value(elt)
-                    element_types.add(element_type)
-                if len(element_types) == 1:
-                    return f"set[{element_types.pop()}]"
-                else:
-                    return "set"
-            return "set"
-        elif isinstance(node, ast.Tuple):
-            # 分析元组元素类型
-            if node.elts:
-                element_types = []
-                for elt in node.elts:
-                    element_type = self._infer_type_from_value(elt)
-                    element_types.append(element_type)
-                if len(element_types) <= 5:  # 如果元素不太多，显示具体类型
-                    return f"tuple[{', '.join(element_types)}]"
-                else:
-                    return "tuple"
-            return "tuple"
-        elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name):
-                func_name = node.func.id
-                # 内建函数返回类型推断
-                builtin_returns = {
-                    'len': 'int',
-                    'sum': 'int | float',
-                    'min': 'int | float',
-                    'max': 'int | float',
-                    'abs': 'int | float',
-                    'round': 'int | float',
-                    'str': 'str',
-                    'int': 'int',
-                    'float': 'float',
-                    'bool': 'bool',
-                    'list': 'list',
-                    'dict': 'dict',
-                    'set': 'set',
-                    'tuple': 'tuple',
-                    'type': 'type',
-                    'range': 'range',
-                    'enumerate': 'enumerate',
-                    'zip': 'zip',
-                    'map': 'map',
-                    'filter': 'filter',
-                    'sorted': 'list',
-                    'reversed': 'reversed',
-                    'open': 'TextIOWrapper',
-                    'input': 'str',
-                    'print': 'None'
-                }
-                
-                if func_name in builtin_returns:
-                    return builtin_returns[func_name]
-                else:
-                    # 首先检查是否是类的构造函数调用
-                    if func_name in self.classes:
-                        return func_name  # 类的实例化返回该类的类型
-                    # 然后检查是否是已定义的函数
-                    elif func_name in self.functions:
-                        func_info = self.functions[func_name]
-                        if func_info.get('returns'):
-                            return func_info['returns']
-                        else:
-                            return f"return_of_{func_name}"
-                    # 检查是否是在全局作用域中可能的类名（大写开头的标识符可能是类）
-                    elif func_name[0].isupper():
-                        return func_name  # 假设大写开头的调用是类实例化
-                    return f"return_of_{func_name}"
-            elif isinstance(node.func, ast.Attribute):
-                # 方法调用类型推断
-                attr_name = node.func.attr
-                method_returns = {
-                    'append': 'None',
-                    'extend': 'None',
-                    'insert': 'None',
-                    'remove': 'None',
-                    'pop': 'Any',
-                    'clear': 'None',
-                    'copy': 'list',
-                    'count': 'int',
-                    'index': 'int',
-                    'reverse': 'None',
-                    'sort': 'None',
-                    'join': 'str',
-                    'split': 'list[str]',
-                    'strip': 'str',
-                    'upper': 'str',
-                    'lower': 'str',
-                    'replace': 'str',
-                    'format': 'str',
-                    'get': 'Any',
-                    'keys': 'dict_keys',
-                    'values': 'dict_values',
-                    'items': 'dict_items',
-                    'update': 'None',
-                    'add': 'None',
-                    'discard': 'None',
-                    'union': 'set',
-                    'intersection': 'set'
-                }
-                
-                if attr_name in method_returns:
-                    return method_returns[attr_name]
-                else:
-                    return f"return_of_{attr_name}"
-        elif isinstance(node, ast.BinOp):
-            # 二元运算符类型推断
-            left_type = self._infer_type_from_value(node.left)
-            right_type = self._infer_type_from_value(node.right)
-            
-            if isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow)):
-                # 算术运算
-                if left_type == 'str' or right_type == 'str':
-                    if isinstance(node.op, ast.Add):
-                        return 'str'  # 字符串拼接
-                    elif isinstance(node.op, ast.Mult):
-                        return 'str'  # 字符串重复
-                if 'float' in [left_type, right_type]:
-                    return 'float'
-                elif 'int' in [left_type, right_type]:
-                    return 'int' if not isinstance(node.op, ast.Div) else 'float'
-                else:
-                    return 'int | float'
-            elif isinstance(node.op, ast.FloorDiv):
-                return 'int'
-            elif isinstance(node.op, (ast.BitOr, ast.BitXor, ast.BitAnd, ast.LShift, ast.RShift)):
-                return 'int'
-        elif isinstance(node, ast.UnaryOp):
-            # 一元运算符类型推断
-            operand_type = self._infer_type_from_value(node.operand)
-            if isinstance(node.op, ast.Not):
-                return 'bool'
-            elif isinstance(node.op, (ast.UAdd, ast.USub)):
-                return operand_type
-            elif isinstance(node.op, ast.Invert):
-                return 'int'
-        elif isinstance(node, ast.Compare):
-            # 比较运算结果总是bool
-            return 'bool'
-        elif isinstance(node, ast.BoolOp):
-            # 布尔运算结果总是bool
-            return 'bool'
-        elif isinstance(node, ast.ListComp):
-            # 列表推导式
-            return 'list'
-        elif isinstance(node, ast.DictComp):
-            # 字典推导式
-            return 'dict'
-        elif isinstance(node, ast.SetComp):
-            # 集合推导式
-            return 'set'
-        elif isinstance(node, ast.GeneratorExp):
-            # 生成器表达式
-            return 'generator'
-        elif isinstance(node, ast.Attribute):
-            # 属性访问类型推断
-            return 'Any'
-        elif isinstance(node, ast.Subscript):
-            # 下标访问类型推断
-            return 'Any'
-        elif isinstance(node, ast.Name):
-            # 变量引用
-            if node.id in self.variables:
-                var_info = self.variables[node.id]
-                if var_info.get('annotation'):
-                    return var_info['annotation']
-                elif var_info.get('inferred_type'):
-                    return var_info['inferred_type']
-            return 'Any'
+    def _infer_type_from_value(self, node, context=None) -> str:
+        """智能类型推导 - 基于AST节点、上下文和数据流分析"""
+        return self._advanced_type_inference(node, context or {})
+    
+    def _advanced_type_inference(self, node, context: Dict[str, Any]) -> str:
+        """高级类型推导引擎"""
         
-        return "unknown"
+        # 常量值直接推导
+        if isinstance(node, ast.Constant):
+            return self._infer_constant_type(node.value)
+        
+        # 容器类型智能推导
+        elif isinstance(node, (ast.List, ast.Set, ast.Tuple)):
+            return self._infer_container_type(node, context)
+        
+        # 字典类型智能推导
+        elif isinstance(node, ast.Dict):
+            return self._infer_dict_type(node, context)
+        
+        # 函数调用智能推导
+        elif isinstance(node, ast.Call):
+            return self._infer_call_type(node, context)
+        
+        # 运算表达式智能推导
+        elif isinstance(node, ast.BinOp):
+            return self._infer_binop_type(node, context)
+        
+        # 一元运算智能推导
+        elif isinstance(node, ast.UnaryOp):
+            return self._infer_unary_type(node, context)
+        
+        # 比较和逻辑运算
+        elif isinstance(node, (ast.Compare, ast.BoolOp)):
+            return 'bool'
+        
+        # 推导式智能推导
+        elif isinstance(node, (ast.ListComp, ast.DictComp, ast.SetComp, ast.GeneratorExp)):
+            return self._infer_comprehension_type(node, context)
+        
+        # 变量引用智能推导
+        elif isinstance(node, ast.Name):
+            return self._infer_name_type(node, context)
+        
+        # 属性访问智能推导
+        elif isinstance(node, ast.Attribute):
+            return self._infer_attribute_type(node, context)
+        
+        # 下标访问智能推导
+        elif isinstance(node, ast.Subscript):
+            return self._infer_subscript_type(node, context)
+        
+        # 条件表达式
+        elif isinstance(node, ast.IfExp):
+            return self._infer_conditional_type(node, context)
+        
+        # Lambda表达式
+        elif isinstance(node, ast.Lambda):
+            return self._infer_lambda_type(node, context)
+        
+        return "Any"
+    
+    def _infer_constant_type(self, value) -> str:
+        """常量类型推导"""
+        if isinstance(value, bool):
+            return "bool"
+        elif isinstance(value, int):
+            # 检查是否可能是枚举值或特殊常量
+            if value in (0, 1, -1):
+                return "int"  # 常见的特殊值
+            return "int"
+        elif isinstance(value, float):
+            return "float"
+        elif isinstance(value, str):
+            # 分析字符串模式
+            if value.isdigit():
+                return "str"  # 虽然是数字字符串，但类型仍是str
+            elif value.startswith(('http://', 'https://')):
+                return "str"  # URL字符串
+            elif len(value) == 1:
+                return "str"  # 单字符
+            return "str"
+        elif isinstance(value, bytes):
+            return "bytes"
+        elif value is None:
+            return "None"
+        else:
+            return f"Literal[{repr(value)}]"
+    
+    def _infer_container_type(self, node, context: Dict[str, Any]) -> str:
+        """智能容器类型推导"""
+        container_type = {
+            ast.List: "list",
+            ast.Set: "set", 
+            ast.Tuple: "tuple"
+        }[type(node)]
+        
+        if not node.elts:
+            return container_type
+        
+        # 分析元素类型模式
+        element_types = []
+        type_distribution = {}
+        
+        # 采样策略：对于大容器，采样分析
+        sample_size = min(len(node.elts), 10)
+        sample_indices = self._get_sample_indices(len(node.elts), sample_size)
+        
+        for i in sample_indices:
+            elt_type = self._advanced_type_inference(node.elts[i], context)
+            element_types.append(elt_type)
+            type_distribution[elt_type] = type_distribution.get(elt_type, 0) + 1
+        
+        # 智能类型合并
+        unified_type = self._unify_types(element_types, type_distribution)
+        
+        if container_type == "tuple" and len(node.elts) <= 8:
+            # 元组保持具体的每个元素类型
+            all_types = [self._advanced_type_inference(elt, context) for elt in node.elts]
+            return f"tuple[{', '.join(all_types)}]"
+        
+        return f"{container_type}[{unified_type}]" if unified_type != "Any" else container_type
+    
+    def _infer_dict_type(self, node, context: Dict[str, Any]) -> str:
+        """智能字典类型推导"""
+        if not node.keys or not node.values:
+            return "dict"
+        
+        key_types = []
+        value_types = []
+        
+        # 采样分析
+        sample_size = min(len(node.keys), 10)
+        sample_indices = self._get_sample_indices(len(node.keys), sample_size)
+        
+        for i in sample_indices:
+            if node.keys[i]:  # 排除None键
+                key_type = self._advanced_type_inference(node.keys[i], context)
+                key_types.append(key_type)
+            
+            value_type = self._advanced_type_inference(node.values[i], context)
+            value_types.append(value_type)
+        
+        # 统一类型
+        unified_key_type = self._unify_types(key_types, {})
+        unified_value_type = self._unify_types(value_types, {})
+        
+        if unified_key_type != "Any" and unified_value_type != "Any":
+            return f"dict[{unified_key_type}, {unified_value_type}]"
+        
+        return "dict"
+    
+    def _infer_call_type(self, node, context: Dict[str, Any]) -> str:
+        """智能函数调用类型推导"""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            
+            # 扩展的内建函数类型推导
+            builtin_returns = self._get_enhanced_builtin_returns()
+            
+            if func_name in builtin_returns:
+                # 根据参数进行更精确的推导
+                return self._refine_builtin_return_type(func_name, node.args, builtin_returns[func_name], context)
+            
+            # 类构造函数检测
+            if func_name in self.classes:
+                return func_name
+            
+            # 用户定义函数
+            if func_name in self.functions:
+                func_info = self.functions[func_name]
+                if func_info.get('returns'):
+                    return func_info['returns']
+                
+                # 尝试从函数体推导返回类型
+                return self._infer_function_return_type(func_name, node.args, context)
+            
+            # 工厂函数模式检测
+            if func_name.endswith('_factory') or func_name.startswith('create_'):
+                return self._infer_factory_return_type(func_name, node.args, context)
+            
+            # 可能的类名（命名约定）
+            if func_name[0].isupper():
+                return func_name
+                
+            return f"return_of_{func_name}"
+        
+        elif isinstance(node.func, ast.Attribute):
+            return self._infer_method_call_type(node, context)
+        
+        return "Any"
+    
+    def _infer_method_call_type(self, node, context: Dict[str, Any]) -> str:
+        """智能方法调用类型推导"""
+        attr_name = node.func.attr
+        
+        # 扩展的方法返回类型映射
+        method_returns = self._get_enhanced_method_returns()
+        
+        if attr_name in method_returns:
+            base_type = method_returns[attr_name]
+            
+            # 根据调用对象类型进行精化
+            if hasattr(node.func, 'value'):
+                obj_type = self._advanced_type_inference(node.func.value, context)
+                return self._refine_method_return_type(attr_name, obj_type, base_type, node.args, context)
+            
+            return base_type
+        
+        # 链式调用模式检测
+        if hasattr(node.func, 'value') and isinstance(node.func.value, ast.Call):
+            chain_type = self._infer_call_chain_type(node, context)
+            if chain_type != "Any":
+                return chain_type
+        
+        return f"return_of_{attr_name}"
+    
+    def _infer_unary_type(self, node, context: Dict[str, Any]) -> str:
+        """智能一元运算类型推导"""
+        operand_type = self._advanced_type_inference(node.operand, context)
+        
+        if isinstance(node.op, ast.Not):
+            return 'bool'
+        elif isinstance(node.op, (ast.UAdd, ast.USub)):
+            return operand_type
+        elif isinstance(node.op, ast.Invert):
+            return 'int'
+        else:
+            return operand_type
+    
+    def _infer_function_return_type(self, func_name: str, args: List, context: Dict[str, Any]) -> str:
+        """推导用户定义函数的返回类型"""
+        # 这里可以进行更复杂的分析，比如分析函数体中的return语句
+        # 目前简化为返回函数信息中的推导类型
+        if func_name in self.functions:
+            func_info = self.functions[func_name]
+            if func_info.get('inferred_return_type'):
+                return func_info['inferred_return_type']
+        
+        return f"return_of_{func_name}"
+    
+    def _infer_factory_return_type(self, func_name: str, args: List, context: Dict[str, Any]) -> str:
+        """推导工厂函数的返回类型"""
+        # 基于函数名推测返回类型
+        if func_name.endswith('_factory'):
+            # 尝试从函数名推导类型
+            base_name = func_name.replace('_factory', '')
+            if base_name.title() in self.classes:
+                return base_name.title()
+        
+        elif func_name.startswith('create_'):
+            # create_user -> User
+            type_name = func_name.replace('create_', '').title()
+            if type_name in self.classes:
+                return type_name
+        
+        return "Any"
+    
+    def _refine_method_return_type(self, method_name: str, obj_type: str, base_type: str, args: List, context: Dict[str, Any]) -> str:
+        """根据对象类型精化方法返回类型"""
+        # 链式方法通常返回同类型对象
+        chainable_methods = {'strip', 'upper', 'lower', 'replace', 'format', 'join'}
+        if method_name in chainable_methods and obj_type.startswith('str'):
+            return 'str'
+        
+        # 容器方法的返回类型优化
+        if obj_type.startswith('list[') and method_name == 'pop':
+            # list[int].pop() -> int
+            element_type = obj_type[5:-1]  # 提取元素类型
+            return element_type
+        
+        return base_type
+    
+    def _infer_call_chain_type(self, node, context: Dict[str, Any]) -> str:
+        """推导链式调用的类型"""
+        # obj.method1().method2() 的类型推导
+        if hasattr(node.func, 'value') and isinstance(node.func.value, ast.Call):
+            prev_call_type = self._infer_call_type(node.func.value, context)
+            method_name = node.func.attr
+            
+            # 基于前一个调用的返回类型和当前方法推导
+            return self._refine_method_return_type(method_name, prev_call_type, "Any", node.args, context)
+        
+        return "Any"
+    
+    def _infer_matmul_type(self, left_type: str, right_type: str) -> str:
+        """推导矩阵乘法返回类型"""
+        # 简化的矩阵乘法类型推导
+        numpy_types = {'ndarray', 'matrix'}
+        if any(t in left_type for t in numpy_types) or any(t in right_type for t in numpy_types):
+            return 'ndarray'
+        
+        return "Any"
+    
+    def _infer_tuple_element_type(self, generic_part: str, slice_node, context: Dict[str, Any]) -> str:
+        """推导元组元素类型"""
+        # 对于tuple[int, str, float]这样的类型，根据索引返回对应类型
+        if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, int):
+            index = slice_node.value
+            types = [t.strip() for t in generic_part.split(',')]
+            if 0 <= index < len(types):
+                return types[index]
+        
+        # 如果索引超出范围或不是常量，返回Union类型
+        types = [t.strip() for t in generic_part.split(',')]
+        return " | ".join(types) if len(types) <= 3 else "Any"
+    
+    def _infer_binop_type(self, node, context: Dict[str, Any]) -> str:
+        """智能二元运算类型推导"""
+        left_type = self._advanced_type_inference(node.left, context)
+        right_type = self._advanced_type_inference(node.right, context)
+        
+        # 数值运算类型推导
+        if isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Mod, ast.Pow)):
+            return self._infer_arithmetic_result_type(node.op, left_type, right_type)
+        
+        elif isinstance(node.op, ast.Div):
+            # 除法总是返回float（Python 3行为）
+            return "float"
+        
+        elif isinstance(node.op, ast.FloorDiv):
+            # 整除操作
+            if "int" in [left_type, right_type] and "float" not in [left_type, right_type]:
+                return "int"
+            return "int | float"
+        
+        # 位运算
+        elif isinstance(node.op, (ast.BitOr, ast.BitXor, ast.BitAnd, ast.LShift, ast.RShift)):
+            return "int"
+        
+        # 矩阵乘法
+        elif isinstance(node.op, ast.MatMult):
+            return self._infer_matmul_type(left_type, right_type)
+        
+        return "Any"
+    
+    def _infer_comprehension_type(self, node, context: Dict[str, Any]) -> str:
+        """智能推导式类型推导"""
+        if isinstance(node, ast.ListComp):
+            elt_type = self._advanced_type_inference(node.elt, context)
+            return f"list[{elt_type}]" if elt_type != "Any" else "list"
+        
+        elif isinstance(node, ast.SetComp):
+            elt_type = self._advanced_type_inference(node.elt, context)
+            return f"set[{elt_type}]" if elt_type != "Any" else "set"
+        
+        elif isinstance(node, ast.DictComp):
+            key_type = self._advanced_type_inference(node.key, context)
+            value_type = self._advanced_type_inference(node.value, context)
+            if key_type != "Any" and value_type != "Any":
+                return f"dict[{key_type}, {value_type}]"
+            return "dict"
+        
+        elif isinstance(node, ast.GeneratorExp):
+            elt_type = self._advanced_type_inference(node.elt, context)
+            return f"Generator[{elt_type}, None, None]" if elt_type != "Any" else "Generator"
+        
+        return "Any"
+    
+    def _infer_name_type(self, node, context: Dict[str, Any]) -> str:
+        """智能变量名类型推导"""
+        var_name = node.id
+        
+        # 查找变量信息
+        if var_name in self.variables:
+            var_info = self.variables[var_name]
+            
+            # 优先使用显式注解
+            if var_info.get('annotation'):
+                return var_info['annotation']
+            
+            # 使用推导的类型
+            if var_info.get('inferred_type'):
+                return var_info['inferred_type']
+        
+        # 上下文中的变量类型
+        if var_name in context.get('local_vars', {}):
+            return context['local_vars'][var_name]
+        
+        # 命名约定推导
+        return self._infer_type_from_naming_convention(var_name)
+    
+    def _infer_attribute_type(self, node, context: Dict[str, Any]) -> str:
+        """智能属性访问类型推导"""
+        obj_type = self._advanced_type_inference(node.value, context)
+        attr_name = node.attr
+        
+        # 常见属性类型映射
+        common_attributes = {
+            'str': {'upper': 'str', 'lower': 'str', 'strip': 'str', 'split': 'list[str]'},
+            'list': {'append': 'None', 'pop': 'Any', 'index': 'int', 'count': 'int'},
+            'dict': {'keys': 'dict_keys', 'values': 'dict_values', 'items': 'dict_items'},
+        }
+        
+        base_type = obj_type.split('[')[0]  # 去掉泛型参数
+        if base_type in common_attributes and attr_name in common_attributes[base_type]:
+            return common_attributes[base_type][attr_name]
+        
+        return "Any"
+    
+    def _infer_subscript_type(self, node, context: Dict[str, Any]) -> str:
+        """智能下标访问类型推导"""
+        obj_type = self._advanced_type_inference(node.value, context)
+        
+        # 提取容器的元素类型
+        if '[' in obj_type and ']' in obj_type:
+            # 提取泛型参数
+            generic_part = obj_type[obj_type.find('[') + 1:obj_type.rfind(']')]
+            
+            if obj_type.startswith('list[') or obj_type.startswith('set['):
+                return generic_part
+            elif obj_type.startswith('dict['):
+                # 字典访问返回值类型
+                if ',' in generic_part:
+                    return generic_part.split(',')[1].strip()
+                return "Any"
+            elif obj_type.startswith('tuple['):
+                # 元组可能需要更复杂的索引分析
+                return self._infer_tuple_element_type(generic_part, node.slice, context)
+        
+        # 基础类型的下标访问
+        base_type_mapping = {
+            'list': 'Any',
+            'dict': 'Any', 
+            'tuple': 'Any',
+            'str': 'str',
+            'bytes': 'int'
+        }
+        
+        base_type = obj_type.split('[')[0]
+        return base_type_mapping.get(base_type, "Any")
+    
+    # 辅助方法
+    def _get_sample_indices(self, total_size: int, sample_size: int) -> List[int]:
+        """获取采样索引"""
+        if total_size <= sample_size:
+            return list(range(total_size))
+        
+        # 均匀采样
+        step = total_size // sample_size
+        indices = [i * step for i in range(sample_size)]
+        
+        # 确保包含首尾元素
+        indices[0] = 0
+        if total_size - 1 not in indices:
+            indices[-1] = total_size - 1
+            
+        return indices
+    
+    def _unify_types(self, types: List[str], distribution: Dict[str, int]) -> str:
+        """智能类型统一"""
+        if not types:
+            return "Any"
+        
+        # 去重并统计
+        unique_types = list(set(types))
+        
+        if len(unique_types) == 1:
+            return unique_types[0]
+        
+        # 数值类型统一
+        numeric_types = {'int', 'float'}
+        if all(t in numeric_types for t in unique_types):
+            return 'float' if 'float' in unique_types else 'int'
+        
+        # 字符串和数值混合 - 通常是Any
+        if any(t in numeric_types for t in unique_types) and 'str' in unique_types:
+            return "Any"
+        
+        # Union类型（限制数量）
+        if len(unique_types) <= 3:
+            return " | ".join(sorted(unique_types))
+        
+        return "Any"
+    
+    def _get_enhanced_builtin_returns(self) -> Dict[str, str]:
+        """获取增强的内建函数返回类型"""
+        return {
+            'len': 'int',
+            'sum': 'int | float',
+            'min': 'Any',  # 取决于参数
+            'max': 'Any',  # 取决于参数
+            'abs': 'int | float',
+            'round': 'int | float',
+            'str': 'str',
+            'int': 'int',
+            'float': 'float',
+            'bool': 'bool',
+            'list': 'list',
+            'dict': 'dict',
+            'set': 'set',
+            'tuple': 'tuple',
+            'type': 'type',
+            'range': 'range',
+            'enumerate': 'enumerate',
+            'zip': 'zip',
+            'map': 'map',
+            'filter': 'filter',
+            'sorted': 'list',
+            'reversed': 'Iterator',
+            'open': 'TextIOWrapper | BinaryIO',
+            'input': 'str',
+            'print': 'None',
+            'next': 'Any',
+            'iter': 'Iterator',
+            'all': 'bool',
+            'any': 'bool',
+            'chr': 'str',
+            'ord': 'int',
+            'hex': 'str',
+            'oct': 'str',
+            'bin': 'str',
+            'repr': 'str',
+            'hash': 'int',
+            'id': 'int',
+            'callable': 'bool',
+            'isinstance': 'bool',
+            'hasattr': 'bool',
+            'getattr': 'Any',
+            'setattr': 'None',
+            'delattr': 'None'
+        }
+    
+    def _get_enhanced_method_returns(self) -> Dict[str, str]:
+        """获取增强的方法返回类型"""
+        return {
+            # 列表方法
+            'append': 'None', 'extend': 'None', 'insert': 'None',
+            'remove': 'None', 'pop': 'Any', 'clear': 'None',
+            'copy': 'list', 'count': 'int', 'index': 'int',
+            'reverse': 'None', 'sort': 'None',
+            
+            # 字符串方法
+            'join': 'str', 'split': 'list[str]', 'strip': 'str',
+            'upper': 'str', 'lower': 'str', 'replace': 'str',
+            'format': 'str', 'find': 'int', 'startswith': 'bool',
+            'endswith': 'bool', 'isdigit': 'bool', 'isalpha': 'bool',
+            
+            # 字典方法
+            'get': 'Any', 'keys': 'dict_keys', 'values': 'dict_values',
+            'items': 'dict_items', 'update': 'None', 'setdefault': 'Any',
+            
+            # 集合方法
+            'add': 'None', 'discard': 'None', 'remove': 'None',
+            'union': 'set', 'intersection': 'set', 'difference': 'set',
+            
+            # 文件方法
+            'read': 'str', 'readline': 'str', 'readlines': 'list[str]',
+            'write': 'int', 'close': 'None', 'flush': 'None',
+        }
+    
+    def _infer_type_from_naming_convention(self, var_name: str) -> str:
+        """基于命名约定推导类型"""
+        name_lower = var_name.lower()
+        
+        # 常见命名模式
+        patterns = {
+            'count': 'int', 'index': 'int', 'size': 'int', 'length': 'int',
+            'flag': 'bool', 'enabled': 'bool', 'disabled': 'bool',
+            'name': 'str', 'title': 'str', 'message': 'str', 'text': 'str',
+            'path': 'str', 'filename': 'str', 'url': 'str',
+            'items': 'list', 'data': 'list | dict', 'results': 'list',
+            'config': 'dict', 'settings': 'dict', 'params': 'dict'
+        }
+        
+        for pattern, type_hint in patterns.items():
+            if pattern in name_lower:
+                return type_hint
+        
+        # 复数形式可能是列表
+        if name_lower.endswith('s') and len(name_lower) > 2:
+            return "list"
+        
+        return "Any"
+    
+    def _refine_builtin_return_type(self, func_name: str, args: List, base_type: str, context: Dict[str, Any]) -> str:
+        """根据参数精化内建函数返回类型"""
+        if func_name in ('min', 'max') and args:
+            # min/max返回与输入相同的类型
+            arg_types = [self._advanced_type_inference(arg, context) for arg in args[:2]]
+            return self._unify_types(arg_types, {})
+        
+        elif func_name == 'sum' and args:
+            # sum的返回类型取决于输入
+            first_arg_type = self._advanced_type_inference(args[0], context)
+            if 'float' in first_arg_type:
+                return 'float'
+            elif 'int' in first_arg_type:
+                return 'int'
+        
+        return base_type
+    
+    def _infer_arithmetic_result_type(self, op, left_type: str, right_type: str) -> str:
+        """推导算术运算结果类型"""
+        # 字符串特殊处理
+        if isinstance(op, ast.Add) and ('str' in [left_type, right_type]):
+            return 'str'
+        
+        if isinstance(op, ast.Mult) and ('str' in [left_type, right_type]) and ('int' in [left_type, right_type]):
+            return 'str'
+        
+        # 数值运算
+        if 'float' in [left_type, right_type]:
+            return 'float'
+        elif 'int' in [left_type, right_type]:
+            return 'int'
+        else:
+            return 'int | float'
+    
+    def _infer_conditional_type(self, node, context: Dict[str, Any]) -> str:
+        """推导条件表达式类型"""
+        if_type = self._advanced_type_inference(node.body, context)
+        else_type = self._advanced_type_inference(node.orelse, context)
+        return self._unify_types([if_type, else_type], {})
+    
+    def _infer_lambda_type(self, node, context: Dict[str, Any]) -> str:
+        """推导Lambda表达式类型"""
+        # 简化的Lambda类型推导
+        return_type = self._advanced_type_inference(node.body, context)
+        return f"Callable[..., {return_type}]"
 
 class TypeInferrer:
     """类型推导器"""
@@ -797,31 +1199,22 @@ class UndeclaredVariableVisitor(ast.NodeVisitor):
         self.current_function = None
         self.function_params = {}  # 存储每个函数的参数
         
-        # Python内建函数和类型
-        self.builtins = {
-            # 常用函数
-            'print', 'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
-            'sum', 'min', 'max', 'abs', 'round', 'sorted', 'reversed', 'enumerate', 'zip',
-            'map', 'filter', 'any', 'all', 'range', 'iter', 'next', 'open', 'type', 'isinstance',
-            'hasattr', 'getattr', 'setattr', 'delattr', 'dir', 'vars', 'globals', 'locals',
-            'eval', 'exec', 'compile', 'format', 'repr', 'chr', 'ord', 'hex', 'oct', 'bin',
-            'input', 'help', 'id', 'hash', 'callable', 'classmethod', 'staticmethod', 'property',
-            'super', 'slice', 'memoryview', 'bytearray', 'bytes', 'frozenset', 'complex',
-            'divmod', 'pow', 'round',
-            
-            # 异常类
-            'Exception', 'BaseException', 'ValueError', 'TypeError', 'IndexError', 'KeyError',
-            'AttributeError', 'NameError', 'SyntaxError', 'RuntimeError', 'NotImplementedError',
-            'ImportError', 'ModuleNotFoundError', 'FileNotFoundError', 'PermissionError',
-            'OSError', 'IOError', 'ZeroDivisionError', 'OverflowError', 'RecursionError',
-            
-            # 常量
-            'True', 'False', 'None', '__name__', '__file__', '__doc__', '__package__',
+        # 动态获取Python内建函数和类型
+        # 优势：
+        # 1. 自动包含所有内建函数，避免遗漏（如breakpoint、aiter、anext等）
+        # 2. 适应不同Python版本的差异
+        # 3. 减少维护工作，无需手动更新列表
+        # 4. 更加准确和可靠
+        self.builtins = set(dir(builtins))
+        
+        # 添加一些特殊的常量和关键字（虽然不在builtins中，但在Python中是预定义的）
+        # 这些名称在模块级别可见，不应被识别为未声明变量
+        special_names = {
+            '__name__', '__file__', '__doc__', '__package__',
             '__spec__', '__loader__', '__cached__', '__builtins__',
-            
-            # 特殊方法常量
-            'object', 'Ellipsis', 'NotImplemented'
+            'Ellipsis', 'NotImplemented'
         }
+        self.builtins.update(special_names)
         
         # 收集所有已声明的名称
         for scope in [symbol_table.get("global_scope", {}), 
